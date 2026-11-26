@@ -11,6 +11,8 @@ permissions:
 
 jobs:
   build-release:
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:
@@ -19,7 +21,7 @@ jobs:
             os_label: macos-apple-silicon
             python_extra: mlx
           - platform: windows-latest
-            os_label: windows-x64-cuda124
+            os_label: windows-x64
             python_extra: torch
 
     runs-on: ${{ matrix.platform }}
@@ -58,32 +60,33 @@ jobs:
         working-directory: backend
         run: uv sync --extra mlx --extra dev --prerelease=allow
 
-      - name: Install Python backend dependencies (Windows CUDA 12.4 + CPU fallback)
+      - name: Install Python backend dependencies (Windows x64)
         if: runner.os == 'Windows'
         working-directory: backend
-        run: |
-          uv sync --extra torch --extra dev --prerelease=allow
-          uv pip install --reinstall torch torchaudio --index-url https://download.pytorch.org/whl/cu124 --extra-index-url https://pypi.org/simple
-          uv run --no-sync python -c "import torch; print('PyTorch:', torch.__version__, 'CUDA wheel:', torch.version.cuda)"
+        run: uv sync --extra torch --extra dev --prerelease=allow
 
       - name: Build standalone AI engine + bundle FFmpeg (${{ matrix.os_label }})
         working-directory: backend
         run: uv run --no-sync python scripts/build_sidecar.py
 
       - name: Build Tauri desktop installer
-        uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: pnpm tauri build --config src-tauri/tauri.release.conf.json
+
+      - name: Publish installers to GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/v')
         with:
-          tagName: v__VERSION__
-          releaseName: "VoxLoom v__VERSION__"
-          releaseBody: |
+          generate_release_notes: true
+          name: "VoxLoom ${{ github.ref_name }}"
+          body: |
             ## VoxLoom Local Voice Cloning Studio
 
-            - **Windows 11/10 (x64 — NVIDIA CUDA 12.4 & CPU)**: Download `VoxLoom_*_x64-setup.exe`. Includes bundled PyTorch CUDA 12.4 + `ffmpeg.exe`/`ffprobe.exe`. Recommended model for 4–6 GB GPUs (e.g. RTX 3050): **Qwen3-TTS 0.6B Base** (~1.5 GB).
-            - **macOS (Apple Silicon M1–M4)**: Download `VoxLoom_*_aarch64.dmg`. Uses native Apple Metal (`mlx-audio`) + bundled `ffmpeg`.
+            - **Windows 11/10 (x64)**: Download `VoxLoom_*_x64-setup.exe` (includes bundled Python AI engine + `ffmpeg.exe`/`ffprobe.exe`). Recommended model for RTX 3050 / 16 GB RAM PCs: **Qwen3-TTS 0.6B Base** (~1.5 GB).
+            - **macOS (Apple Silicon M1–M4)**: Download `VoxLoom_*_aarch64.dmg` (uses native Apple Metal `mlx-audio` + bundled `ffmpeg`).
 
             > Model weights download directly inside the app from Hugging Face Hub on first launch and cache locally for 100% offline use.
-          releaseDraft: false
-          prerelease: false
-          args: --config src-tauri/tauri.release.conf.json
+            >
+            > **NVIDIA CUDA GPU Acceleration on Windows**: Because PyTorch's CUDA 12.4 wheel (~2.4 GB) exceeds GitHub Releases' 2 GB single-file limit, the standalone `.exe` ships with universal CPU support out of the box. For full RTX 3050 CUDA speed, see the README's 3-line Windows CUDA setup.
+          files: |
+            src-tauri/target/release/bundle/nsis/*.exe
+            src-tauri/target/release/bundle/dmg/*.dmg
