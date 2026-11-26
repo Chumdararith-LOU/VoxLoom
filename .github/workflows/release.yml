@@ -40,9 +40,16 @@ jobs:
           echo "VOXLOOM_BUNDLE_FFMPEG=/tmp/static-ffmpeg/ffmpeg" >> "$GITHUB_ENV"
           echo "VOXLOOM_BUNDLE_FFPROBE=/tmp/static-ffmpeg/ffprobe" >> "$GITHUB_ENV"
 
-      - name: Install FFmpeg for bundling (Windows)
+      - name: Download standalone static FFmpeg/FFprobe (Windows x64)
         if: runner.os == 'Windows'
-        run: choco install ffmpeg -y
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "D:\static-ffmpeg" | Out-Null
+          Invoke-WebRequest -Uri "https://github.com/descriptinc/ffmpeg-ffprobe-static/releases/download/b6.1.2-rc.1/ffmpeg-win32-x64" -OutFile "D:\static-ffmpeg\ffmpeg.exe"
+          Invoke-WebRequest -Uri "https://github.com/descriptinc/ffmpeg-ffprobe-static/releases/download/b6.1.2-rc.1/ffprobe-win32-x64" -OutFile "D:\static-ffmpeg\ffprobe.exe"
+          & "D:\static-ffmpeg\ffmpeg.exe" -version | Select-Object -First 1
+          "VOXLOOM_BUNDLE_FFMPEG=D:\static-ffmpeg\ffmpeg.exe" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "VOXLOOM_BUNDLE_FFPROBE=D:\static-ffmpeg\ffprobe.exe" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - uses: pnpm/action-setup@v4
         with:

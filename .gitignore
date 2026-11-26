@@ -17,6 +17,7 @@ backend/**/__pycache__/
 backend/*.egg-info/
 backend/dist/
 backend/build/
+backend/*.spec
 .pytest_cache/
 *.pyc
 

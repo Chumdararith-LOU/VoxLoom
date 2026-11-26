@@ -59,7 +59,7 @@ def _copy_ffmpeg_binaries(dest_dir: Path) -> None:
 
 
 def main() -> None:
-    entry = BACKEND_DIR / "voxloom_backend" / "main.py"
+    entry = BACKEND_DIR / "scripts" / "engine_entry.py"
     dist_dir = BACKEND_DIR / "dist" / "voxloom-engine"
 
     if ENGINE_OUT_DIR.exists():
