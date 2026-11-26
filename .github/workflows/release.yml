@@ -87,6 +87,7 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           test -d src-tauri/resources/engine/_internal
+          test -f src-tauri/resources/engine/_internal/mlx.metallib
           src-tauri/resources/engine/ffmpeg -version | head -n 1
           src-tauri/resources/engine/voxloom-engine --host 127.0.0.1 --port 18765 &
           PID=$!

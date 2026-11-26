@@ -102,6 +102,15 @@ def main() -> None:
 
     shutil.copytree(dist_dir, ENGINE_OUT_DIR)
     _copy_ffmpeg_binaries(ENGINE_OUT_DIR)
+
+    # PyInstaller places libmlx.dylib directly in _internal/, where MLX expects mlx.metallib
+    # alongside it on macOS Apple Silicon (otherwise mlx::core::metal::Device::Device traps).
+    mlx_metallib = ENGINE_OUT_DIR / "_internal" / "mlx" / "lib" / "mlx.metallib"
+    if mlx_metallib.is_file():
+        target_metallib = ENGINE_OUT_DIR / "_internal" / "mlx.metallib"
+        shutil.copy2(mlx_metallib, target_metallib)
+        print(f"Copied mlx.metallib -> {target_metallib}")
+
     print(f"Engine bundle ready at: {ENGINE_OUT_DIR}")
 
 
