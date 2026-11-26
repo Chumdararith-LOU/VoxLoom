@@ -1,0 +1,34 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+build/
+src-tauri/target/
+src-tauri/binaries/voxloom-engine*
+!src-tauri/binaries/.gitkeep
+
+# Python
+backend/.venv/
+backend/__pycache__/
+backend/**/__pycache__/
+backend/*.egg-info/
+backend/dist/
+backend/build/
+.pytest_cache/
+*.pyc
+
+# Local models & generated audio
+models/
+*.wav
+*.m4a
+*.mp3
+!src-tauri/icons/*
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.log

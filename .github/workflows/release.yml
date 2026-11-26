@@ -1,0 +1,70 @@
+name: Release Desktop Installers
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-14
+            os_label: macos-apple-silicon
+            python_extra: mlx
+          - platform: windows-latest
+            os_label: windows-x64-cuda-cpu
+            python_extra: torch
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install frontend dependencies
+        run: pnpm install
+
+      - name: Build standalone Python AI sidecar (${{ matrix.os_label }})
+        working-directory: backend
+        run: |
+          uv sync --extra ${{ matrix.python_extra }} --extra dev --prerelease=allow
+          uv run python scripts/build_sidecar.py
+
+      - name: Build Tauri desktop bundle
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: v__VERSION__
+          releaseName: "VoxLoom v__VERSION__"
+          releaseBody: |
+            ## VoxLoom Local Voice Cloning Studio
+
+            - **macOS (Apple Silicon M1–M4)**: Download the `.dmg` installer (uses native Metal / `mlx-audio`).
+            - **Windows (x64 NVIDIA CUDA / CPU)**: Download the `.msi` or `.exe` installer (uses PyTorch CUDA with automatic CPU fallback).
+
+            > Model weights (~1.8–3.6 GB) download automatically inside the app from Hugging Face Hub on first launch and cache locally for 100% offline use.
+          releaseDraft: true
+          prerelease: false
+          args: --config src-tauri/tauri.release.conf.json
