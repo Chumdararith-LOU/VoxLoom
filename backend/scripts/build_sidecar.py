@@ -7,6 +7,7 @@ limit and launch instantaneously with zero temp-folder extraction delay.
 from __future__ import annotations
 
 import importlib.util
+import os
 import platform
 import shutil
 import subprocess
@@ -37,7 +38,8 @@ METADATA_PACKAGES = [
 def _copy_ffmpeg_binaries(dest_dir: Path) -> None:
     ext = ".exe" if platform.system() == "Windows" else ""
     for tool in ("ffmpeg", "ffprobe"):
-        found = shutil.which(tool)
+        env_override = os.environ.get(f"VOXLOOM_BUNDLE_{tool.upper()}")
+        found = env_override if (env_override and Path(env_override).is_file()) else shutil.which(tool)
         if not found and platform.system() == "Darwin":
             for brew_dir in ("/opt/homebrew/bin", "/usr/local/bin"):
                 p = Path(brew_dir) / tool
@@ -51,6 +53,8 @@ def _copy_ffmpeg_binaries(dest_dir: Path) -> None:
             )
         target = dest_dir / f"{tool}{ext}"
         shutil.copy2(found, target)
+        # Ensure owner-writable executable mode so macOS xattr/codesign never hits EACCES
+        os.chmod(target, 0o755)
         print(f"Bundled {tool} -> {target}")
 
 
