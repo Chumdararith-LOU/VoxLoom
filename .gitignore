@@ -8,6 +8,7 @@ build/
 src-tauri/target/
 src-tauri/binaries/voxloom-engine*
 !src-tauri/binaries/.gitkeep
+src-tauri/resources/engine/
 
 # Python
 backend/.venv/

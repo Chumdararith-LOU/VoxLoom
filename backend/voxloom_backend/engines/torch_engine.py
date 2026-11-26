@@ -60,11 +60,26 @@ class TorchTTSEngine(TTSEngine):
                 "`uv pip install '.[torch]'` (or download the Windows CUDA/CPU release)."
             ) from exc
 
-        self._model = Qwen3TTSModel.from_pretrained(
-            model_repo,
-            device_map=device,
-            dtype=dtype,
-        )
+        try:
+            self._model = Qwen3TTSModel.from_pretrained(
+                model_repo,
+                device_map=device,
+                dtype=dtype,
+            )
+        except Exception as exc:
+            # Graceful fallback to CPU if a low-VRAM GPU runs out of memory on 1.7B
+            if device.startswith("cuda") and "out of memory" in str(exc).lower():
+                import torch
+
+                torch.cuda.empty_cache()
+                self.backend_name = "cpu"
+                self._model = Qwen3TTSModel.from_pretrained(
+                    model_repo,
+                    device_map="cpu",
+                    dtype=torch.float32,
+                )
+            else:
+                raise
         self._repo = model_repo
 
     def unload(self) -> None:

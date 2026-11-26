@@ -27,9 +27,10 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["dmg", "msi", "nsis"],
+    "targets": ["dmg", "nsis"],
     "icon": [
-      "icons/icon.png"
+      "icons/icon.png",
+      "icons/icon.ico"
     ],
     "macOS": {
       "minimumSystemVersion": "13.3"

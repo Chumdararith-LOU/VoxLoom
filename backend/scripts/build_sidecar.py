@@ -1,7 +1,12 @@
-"""Bundle the Python FastAPI engine into a standalone Tauri sidecar binary via PyInstaller."""
+"""Bundle the Python FastAPI engine + static ffmpeg/ffprobe into a Tauri resource bundle.
+
+Uses PyInstaller --onedir so Windows PyTorch CUDA (cu124) DLLs avoid the 2GB PE --onefile
+limit and launch instantaneously with zero temp-folder extraction delay.
+"""
 
 from __future__ import annotations
 
+import importlib.util
 import platform
 import shutil
 import subprocess
@@ -10,44 +15,61 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 BACKEND_DIR = ROOT / "backend"
-TAURI_BIN_DIR = ROOT / "src-tauri" / "binaries"
+ENGINE_OUT_DIR = ROOT / "src-tauri" / "resources" / "engine"
+
+METADATA_PACKAGES = [
+    "transformers",
+    "huggingface-hub",
+    "tokenizers",
+    "safetensors",
+    "numpy",
+    "scipy",
+    "soundfile",
+    "tqdm",
+    "regex",
+    "requests",
+    "packaging",
+    "filelock",
+    "pyyaml",
+]
 
 
-def get_target_triple() -> str:
-    """Return the Rust target triple Tauri expects for externalBin sidecars."""
-    try:
-        out = subprocess.check_output(["rustc", "-vV"], text=True)
-        for line in out.splitlines():
-            if line.startswith("host:"):
-                return line.split("host:")[1].strip()
-    except Exception:
-        pass
-
-    system = platform.system()
-    machine = platform.machine().lower()
-    if system == "Darwin":
-        return "aarch64-apple-darwin" if machine in ("arm64", "aarch64") else "x86_64-apple-darwin"
-    if system == "Windows":
-        return "x86_64-pc-windows-msvc"
-    return "x86_64-unknown-linux-gnu"
+def _copy_ffmpeg_binaries(dest_dir: Path) -> None:
+    ext = ".exe" if platform.system() == "Windows" else ""
+    for tool in ("ffmpeg", "ffprobe"):
+        found = shutil.which(tool)
+        if not found and platform.system() == "Darwin":
+            for brew_dir in ("/opt/homebrew/bin", "/usr/local/bin"):
+                p = Path(brew_dir) / tool
+                if p.is_file():
+                    found = str(p)
+                    break
+        if not found:
+            raise RuntimeError(
+                f"Required media tool '{tool}' not found on PATH. "
+                "Install ffmpeg before bundling."
+            )
+        target = dest_dir / f"{tool}{ext}"
+        shutil.copy2(found, target)
+        print(f"Bundled {tool} -> {target}")
 
 
 def main() -> None:
-    triple = get_target_triple()
-    ext = ".exe" if platform.system() == "Windows" else ""
-    TAURI_BIN_DIR.mkdir(parents=True, exist_ok=True)
-
     entry = BACKEND_DIR / "voxloom_backend" / "main.py"
-    dist_name = f"voxloom-engine-{triple}"
+    dist_dir = BACKEND_DIR / "dist" / "voxloom-engine"
+
+    if ENGINE_OUT_DIR.exists():
+        shutil.rmtree(ENGINE_OUT_DIR)
+    ENGINE_OUT_DIR.parent.mkdir(parents=True, exist_ok=True)
 
     cmd = [
         sys.executable,
         "-m",
         "PyInstaller",
         "--noconfirm",
-        "--onefile",
+        "--onedir",
         "--name",
-        dist_name,
+        "voxloom-engine",
         "--hidden-import",
         "uvicorn.logging",
         "--hidden-import",
@@ -56,15 +78,27 @@ def main() -> None:
         "uvicorn.protocols.http.auto",
         "--hidden-import",
         "uvicorn.lifespan.on",
-        str(entry),
+        "--collect-submodules",
+        "voxloom_backend",
+        "--collect-all",
+        "soundfile",
     ]
+
+    for pkg in METADATA_PACKAGES:
+        cmd.extend(["--copy-metadata", pkg])
+
+    # Collect platform-specific AI runtime assets (Metal shaders on macOS, CUDA/STT libs on Windows)
+    for optional_pkg in ("mlx", "mlx_audio", "qwen_tts", "faster_whisper", "ctranslate2"):
+        if importlib.util.find_spec(optional_pkg) is not None:
+            cmd.extend(["--collect-all", optional_pkg])
+
+    cmd.append(str(entry))
     print("Running:", " ".join(cmd))
     subprocess.run(cmd, cwd=BACKEND_DIR, check=True)
 
-    built_bin = BACKEND_DIR / "dist" / f"{dist_name}{ext}"
-    dest_bin = TAURI_BIN_DIR / f"{dist_name}{ext}"
-    shutil.copy2(built_bin, dest_bin)
-    print(f"Sidecar binary ready at: {dest_bin}")
+    shutil.copytree(dist_dir, ENGINE_OUT_DIR)
+    _copy_ffmpeg_binaries(ENGINE_OUT_DIR)
+    print(f"Engine bundle ready at: {ENGINE_OUT_DIR}")
 
 
 if __name__ == "__main__":

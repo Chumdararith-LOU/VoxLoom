@@ -19,13 +19,21 @@ jobs:
             os_label: macos-apple-silicon
             python_extra: mlx
           - platform: windows-latest
-            os_label: windows-x64-cuda-cpu
+            os_label: windows-x64-cuda124
             python_extra: torch
 
     runs-on: ${{ matrix.platform }}
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install FFmpeg for bundling (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ffmpeg
+
+      - name: Install FFmpeg for bundling (Windows)
+        if: runner.os == 'Windows'
+        run: choco install ffmpeg -y
 
       - uses: pnpm/action-setup@v4
         with:
@@ -45,13 +53,24 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install
 
-      - name: Build standalone Python AI sidecar (${{ matrix.os_label }})
+      - name: Install Python backend dependencies (macOS Apple Silicon MLX)
+        if: runner.os == 'macOS'
+        working-directory: backend
+        run: uv sync --extra mlx --extra dev --prerelease=allow
+
+      - name: Install Python backend dependencies (Windows CUDA 12.4 + CPU fallback)
+        if: runner.os == 'Windows'
         working-directory: backend
         run: |
-          uv sync --extra ${{ matrix.python_extra }} --extra dev --prerelease=allow
-          uv run python scripts/build_sidecar.py
+          uv sync --extra torch --extra dev --prerelease=allow
+          uv pip install --reinstall torch torchaudio --index-url https://download.pytorch.org/whl/cu124 --extra-index-url https://pypi.org/simple
+          uv run --no-sync python -c "import torch; print('PyTorch:', torch.__version__, 'CUDA wheel:', torch.version.cuda)"
 
-      - name: Build Tauri desktop bundle
+      - name: Build standalone AI engine + bundle FFmpeg (${{ matrix.os_label }})
+        working-directory: backend
+        run: uv run --no-sync python scripts/build_sidecar.py
+
+      - name: Build Tauri desktop installer
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -61,10 +80,10 @@ jobs:
           releaseBody: |
             ## VoxLoom Local Voice Cloning Studio
 
-            - **macOS (Apple Silicon M1–M4)**: Download the `.dmg` installer (uses native Metal / `mlx-audio`).
-            - **Windows (x64 NVIDIA CUDA / CPU)**: Download the `.msi` or `.exe` installer (uses PyTorch CUDA with automatic CPU fallback).
+            - **Windows 11/10 (x64 — NVIDIA CUDA 12.4 & CPU)**: Download `VoxLoom_*_x64-setup.exe`. Includes bundled PyTorch CUDA 12.4 + `ffmpeg.exe`/`ffprobe.exe`. Recommended model for 4–6 GB GPUs (e.g. RTX 3050): **Qwen3-TTS 0.6B Base** (~1.5 GB).
+            - **macOS (Apple Silicon M1–M4)**: Download `VoxLoom_*_aarch64.dmg`. Uses native Apple Metal (`mlx-audio`) + bundled `ffmpeg`.
 
-            > Model weights (~1.8–3.6 GB) download automatically inside the app from Hugging Face Hub on first launch and cache locally for 100% offline use.
-          releaseDraft: true
+            > Model weights download directly inside the app from Hugging Face Hub on first launch and cache locally for 100% offline use.
+          releaseDraft: false
           prerelease: false
           args: --config src-tauri/tauri.release.conf.json

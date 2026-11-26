@@ -139,12 +139,21 @@ def detect_hardware() -> HardwareProfile:
     elif cuda_available:
         recommended = "cuda"
         accelerator = cuda_name or "NVIDIA CUDA GPU"
-        rec_tts = "qwen3-tts-torch-base"
-        rec_stt = "faster-whisper-turbo"
+        # Use lightweight 0.6B model on 4-6 GB GPUs (e.g. RTX 3050) to avoid CUDA OOM
+        rec_tts = (
+            "qwen3-tts-torch-0.6b"
+            if (vram_gb is not None and vram_gb < 6.5)
+            else "qwen3-tts-torch-base"
+        )
+        rec_stt = (
+            "faster-whisper-base"
+            if (vram_gb is not None and vram_gb < 5.0)
+            else "faster-whisper-turbo"
+        )
     else:
         recommended = "cpu"
         accelerator = platform.processor() or f"CPU ({arch})"
-        rec_tts = "qwen3-tts-torch-base"
+        rec_tts = "qwen3-tts-torch-0.6b"
         rec_stt = "faster-whisper-base"
 
     return HardwareProfile(
