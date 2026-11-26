@@ -1,5 +1,6 @@
+use std::fs::OpenOptions;
 use std::net::TcpListener;
-use std::process::{Child, Command};
+use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use tauri::{Manager, RunEvent};
 
@@ -29,6 +30,25 @@ fn find_available_port() -> u16 {
         .unwrap_or(8765)
 }
 
+fn open_engine_log_stdio(app: &tauri::App) -> (Stdio, Stdio) {
+    if let Ok(log_dir) = app.path().app_log_dir() {
+        if std::fs::create_dir_all(&log_dir).is_ok() {
+            let log_path = log_dir.join("engine.log");
+            if let Ok(out_file) = OpenOptions::new()
+                .create(true)
+                .write(true)
+                .truncate(true)
+                .open(&log_path)
+            {
+                if let Ok(err_file) = out_file.try_clone() {
+                    return (Stdio::from(out_file), Stdio::from(err_file));
+                }
+            }
+        }
+    }
+    (Stdio::null(), Stdio::null())
+}
+
 fn spawn_bundled_engine(app: &tauri::App, port: u16) -> Option<Child> {
     let resource_dir = app.path().resource_dir().ok()?;
     let exe_name = if cfg!(target_os = "windows") {
@@ -43,8 +63,17 @@ fn spawn_bundled_engine(app: &tauri::App, port: u16) -> Option<Child> {
     ];
 
     let engine_path = candidates.into_iter().find(|p| p.is_file())?;
+    let engine_dir = engine_path.parent()?;
+    let (stdout_cfg, stderr_cfg) = open_engine_log_stdio(app);
+
     let mut cmd = Command::new(&engine_path);
-    cmd.args(["--host", "127.0.0.1", "--port", &port.to_string()]);
+    cmd.current_dir(engine_dir)
+        .args(["--host", "127.0.0.1", "--port", &port.to_string()])
+        // Always attach valid stdio handles so launching from macOS Finder or Windows GUI
+        // never passes closed file descriptors that crash Python/uvicorn logging.
+        .stdin(Stdio::null())
+        .stdout(stdout_cfg)
+        .stderr(stderr_cfg);
 
     #[cfg(target_os = "windows")]
     cmd.creation_flags(CREATE_NO_WINDOW);

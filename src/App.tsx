@@ -49,6 +49,7 @@ export default function App() {
   });
 
   const [backendOnline, setBackendOnline] = useState(false);
+  const [startingUp, setStartingUp] = useState(true);
   const [hardware, setHardware] = useState<HardwareProfile | null>(null);
   const [engineStatus, setEngineStatus] = useState<EngineStatus | null>(null);
   const [models, setModels] = useState<ModelItem[]>([]);
@@ -79,6 +80,7 @@ export default function App() {
         api.listProfiles(),
       ]);
       setBackendOnline(health.status === "ok");
+      if (health.status === "ok") setStartingUp(false);
       setEngineStatus(health.engine);
       setHardware(hw);
       setModels(modRes.models);
@@ -95,14 +97,20 @@ export default function App() {
   useEffect(() => {
     const cleanupAria = initAriaValidationSync(document);
     void refreshAll();
-    const timer = window.setInterval(() => {
-      void refreshAll();
-    }, 8000);
+    const startupGrace = window.setTimeout(() => setStartingUp(false), 12000);
     return () => {
       cleanupAria();
-      window.clearInterval(timer);
+      window.clearTimeout(startupGrace);
     };
   }, [refreshAll]);
+
+  useEffect(() => {
+    const intervalMs = backendOnline ? 8000 : 1200;
+    const timer = window.setInterval(() => {
+      void refreshAll();
+    }, intervalMs);
+    return () => window.clearInterval(timer);
+  }, [backendOnline, refreshAll]);
 
   const activeProfile = profiles.find((p) => p.id === activeProfileId) ?? null;
   const meta = TAB_TITLES[activeTab];
@@ -175,8 +183,14 @@ export default function App() {
           {!backendOnline && (
             <div className="banner-warn" role="alert">
               <span>
-                Local AI engine is offline. In dev mode run <code>pnpm backend:dev</code>, or launch
-                the bundled desktop app.
+                {startingUp ? (
+                  <>Starting local AI engine… connecting automatically in a few seconds.</>
+                ) : (
+                  <>
+                    Local AI engine is offline. In dev mode run <code>pnpm backend:dev</code>, or
+                    restart the desktop app.
+                  </>
+                )}
               </span>
               <button type="button" className="btn" onClick={() => void refreshAll()}>
                 Retry connection

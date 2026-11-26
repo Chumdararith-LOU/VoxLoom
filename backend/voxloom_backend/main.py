@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import os
+import sys
 from contextlib import asynccontextmanager
 
 import uvicorn
@@ -51,7 +53,16 @@ def create_app() -> FastAPI:
 app = create_app()
 
 
+def _ensure_valid_stdio() -> None:
+    """Prevent crashes when launched without a console (macOS Finder / Windows GUI)."""
+    if sys.stdout is None:
+        sys.stdout = open(os.devnull, "w", encoding="utf-8")
+    if sys.stderr is None:
+        sys.stderr = open(os.devnull, "w", encoding="utf-8")
+
+
 def cli() -> None:
+    _ensure_valid_stdio()
     parser = argparse.ArgumentParser(description="Run VoxLoom local FastAPI backend")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
@@ -59,7 +70,13 @@ def cli() -> None:
 
     # Print structured ready marker so the Tauri host can discover the listening address
     print(f"VOXLOOM_ENGINE_STARTING http://{args.host}:{args.port}", flush=True)
-    uvicorn.run(app, host=args.host, port=args.port, log_level="info")
+    uvicorn.run(
+        app,
+        host=args.host,
+        port=args.port,
+        log_level="info",
+        use_colors=False,
+    )
 
 
 if __name__ == "__main__":

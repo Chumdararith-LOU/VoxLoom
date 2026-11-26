@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "voxloom-backend"
-version = "0.1.1"
+version = "0.1.2"
 description = "Cross-platform local voice cloning AI engine for VoxLoom (macOS MLX + Windows/Linux CUDA & CPU)"
 requires-python = ">=3.10,<3.14"
 license = { text = "Apache-2.0" }
