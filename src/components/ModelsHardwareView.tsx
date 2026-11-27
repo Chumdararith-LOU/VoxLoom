@@ -21,6 +21,11 @@ export function ModelsHardwareView({
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [downloadMsg, setDownloadMsg] = useState<string>("");
   const [loadingId, setLoadingId] = useState<string | null>(null);
+  const [showOtherPlatforms, setShowOtherPlatforms] = useState(false);
+
+  const visibleModels = [...models]
+    .filter((m) => showOtherPlatforms || m.compatible)
+    .sort((a, b) => Number(b.compatible) - Number(a.compatible) || Number(b.recommended) - Number(a.recommended));
 
   const handleDownload = async (model: ModelItem) => {
     setDownloadingId(model.id);
@@ -122,10 +127,18 @@ export function ModelsHardwareView({
               Local Model Manager (Hugging Face Hub)
             </h2>
             <p className="deck-sub">
-              Weights download directly from Hugging Face into your local cache (~1.6–3.6 GB). Once
+              Weights download directly from Hugging Face into your local cache (~1.5–3.6 GB). Once
               cached, VoxLoom runs 100% offline.
             </p>
           </div>
+          <label className="checkbox-label">
+            <input
+              type="checkbox"
+              checked={showOtherPlatforms}
+              onChange={(e) => setShowOtherPlatforms(e.target.checked)}
+            />
+            <span>Show other OS backends</span>
+          </label>
         </div>
 
         {downloadingId && (
@@ -138,7 +151,7 @@ export function ModelsHardwareView({
         )}
 
         <div className="model-grid">
-          {models.map((m) => (
+          {visibleModels.map((m) => (
             <article
               key={m.id}
               className={`model-card ${m.recommended ? "recommended" : ""}`}

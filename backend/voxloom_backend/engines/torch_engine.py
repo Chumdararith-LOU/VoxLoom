@@ -53,18 +53,27 @@ class TorchTTSEngine(TTSEngine):
         device, dtype = self._resolve_device_and_dtype()
 
         try:
+            from huggingface_hub import snapshot_download
             from qwen_tts import Qwen3TTSModel
         except ImportError as exc:
             raise RuntimeError(
                 "PyTorch TTS dependencies are not installed. Install with: "
-                "`uv pip install '.[torch]'` (or download the Windows CUDA/CPU release)."
+                "`uv pip install '.[torch]'` (or download the Windows release)."
             ) from exc
+
+        # Resolve to a verified local snapshot folder first so transformers loads
+        # directly from disk and any real Hugging Face network/SSL error surfaces cleanly.
+        try:
+            local_dir = snapshot_download(repo_id=model_repo, local_files_only=True)
+        except Exception:
+            local_dir = snapshot_download(repo_id=model_repo)
 
         try:
             self._model = Qwen3TTSModel.from_pretrained(
-                model_repo,
+                local_dir,
                 device_map=device,
                 dtype=dtype,
+                local_files_only=True,
             )
         except Exception as exc:
             # Graceful fallback to CPU if a low-VRAM GPU runs out of memory on 1.7B
@@ -74,9 +83,10 @@ class TorchTTSEngine(TTSEngine):
                 torch.cuda.empty_cache()
                 self.backend_name = "cpu"
                 self._model = Qwen3TTSModel.from_pretrained(
-                    model_repo,
+                    local_dir,
                     device_map="cpu",
                     dtype=torch.float32,
+                    local_files_only=True,
                 )
             else:
                 raise

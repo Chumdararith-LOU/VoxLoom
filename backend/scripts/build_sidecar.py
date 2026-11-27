@@ -32,6 +32,17 @@ METADATA_PACKAGES = [
     "packaging",
     "filelock",
     "pyyaml",
+    "certifi",
+    "truststore",
+    "torch",
+    "torchaudio",
+    "accelerate",
+    "qwen-tts",
+    "faster-whisper",
+    "onnxruntime",
+    "librosa",
+    "einops",
+    "soxr",
 ]
 
 
@@ -88,11 +99,20 @@ def main() -> None:
         "soundfile",
     ]
 
+    import importlib.metadata
+
     for pkg in METADATA_PACKAGES:
-        cmd.extend(["--copy-metadata", pkg])
+        try:
+            importlib.metadata.distribution(pkg)
+            cmd.extend(["--copy-metadata", pkg])
+        except importlib.metadata.PackageNotFoundError:
+            pass
+
+    # Always include certifi's CA bundle for frozen HTTPS requests to Hugging Face Hub
+    cmd.extend(["--collect-data", "certifi"])
 
     # Collect platform-specific AI runtime assets (Metal shaders on macOS, CUDA/STT libs on Windows)
-    for optional_pkg in ("mlx", "mlx_audio", "qwen_tts", "faster_whisper", "ctranslate2"):
+    for optional_pkg in ("mlx", "mlx_audio", "qwen_tts", "faster_whisper", "ctranslate2", "onnxruntime"):
         if importlib.util.find_spec(optional_pkg) is not None:
             cmd.extend(["--collect-all", optional_pkg])
 

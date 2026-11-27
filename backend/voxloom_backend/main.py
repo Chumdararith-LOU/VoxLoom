@@ -61,8 +61,30 @@ def _ensure_valid_stdio() -> None:
         sys.stderr = open(os.devnull, "w", encoding="utf-8")
 
 
+def _configure_tls_certificates() -> None:
+    """Ensure HTTPS requests to Hugging Face Hub work inside frozen Windows/macOS bundles."""
+    os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
+    try:
+        import certifi
+
+        ca_bundle = certifi.where()
+        if os.path.isfile(ca_bundle):
+            os.environ.setdefault("SSL_CERT_FILE", ca_bundle)
+            os.environ.setdefault("REQUESTS_CA_BUNDLE", ca_bundle)
+            os.environ.setdefault("CURL_CA_BUNDLE", ca_bundle)
+    except Exception:
+        pass
+    try:
+        import truststore
+
+        truststore.inject_into_ssl()
+    except Exception:
+        pass
+
+
 def cli() -> None:
     _ensure_valid_stdio()
+    _configure_tls_certificates()
     parser = argparse.ArgumentParser(description="Run VoxLoom local FastAPI backend")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)

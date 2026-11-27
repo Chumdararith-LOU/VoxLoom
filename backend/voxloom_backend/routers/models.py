@@ -28,6 +28,27 @@ def list_models() -> dict:
     }
 
 
+@router.get("/check-hub")
+def check_hub() -> dict:
+    """Verify TLS connectivity to Hugging Face Hub and platform AI engine imports."""
+    from huggingface_hub import HfApi
+
+    from ..hardware import detect_hardware
+
+    hw = detect_hardware()
+    repo = "mlx-community/Qwen3-TTS-12Hz-1.7B-Base-8bit" if hw.recommended_backend == "mlx" else "Qwen/Qwen3-TTS-12Hz-0.6B-Base"
+    try:
+        info = HfApi().model_info(repo)
+        if hw.recommended_backend == "mlx":
+            import mlx_audio  # noqa: F401
+        else:
+            import faster_whisper  # noqa: F401
+            from qwen_tts import Qwen3TTSModel  # noqa: F401
+        return {"ok": True, "repo": info.id, "backend": hw.recommended_backend}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Hub/runtime check failed: {exc}") from exc
+
+
 @router.post("/load")
 def load_model(req: ModelActionRequest) -> dict:
     try:

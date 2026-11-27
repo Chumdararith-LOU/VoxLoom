@@ -190,11 +190,14 @@ async function streamPostSse(
     for (const part of parts) {
       for (const line of part.split("\n")) {
         if (line.startsWith("data: ")) {
+          let parsed: Record<string, unknown> | null = null;
           try {
-            const parsed = JSON.parse(line.slice(6)) as Record<string, unknown>;
-            onEvent(parsed);
+            parsed = JSON.parse(line.slice(6)) as Record<string, unknown>;
           } catch {
             // ignore malformed keepalive
+          }
+          if (parsed !== null) {
+            onEvent(parsed);
           }
         }
       }

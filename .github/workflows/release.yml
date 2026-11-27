@@ -93,6 +93,9 @@ jobs:
           PID=$!
           for i in $(seq 1 20); do
             if curl -sf http://127.0.0.1:18765/api/system/health; then
+              echo ""
+              curl -sf http://127.0.0.1:18765/api/models/check-hub
+              echo ""
               kill $PID || true
               exit 0
             fi
@@ -113,7 +116,11 @@ jobs:
             Start-Sleep -Seconds 1
             try {
               $resp = Invoke-RestMethod -Uri "http://127.0.0.1:18765/api/system/health" -TimeoutSec 2
-              if ($resp.status -eq "ok") { $ok = $true; break }
+              if ($resp.status -eq "ok") {
+                $hub = Invoke-RestMethod -Uri "http://127.0.0.1:18765/api/models/check-hub" -TimeoutSec 20
+                Write-Host "Hub/runtime check:" ($hub | ConvertTo-Json -Compress)
+                if ($hub.ok -eq $true) { $ok = $true; break }
+              }
             } catch {}
           }
           Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
