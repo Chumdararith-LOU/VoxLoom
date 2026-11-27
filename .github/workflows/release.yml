@@ -89,7 +89,9 @@ jobs:
           test -d src-tauri/resources/engine/_internal
           test -f src-tauri/resources/engine/_internal/mlx.metallib
           src-tauri/resources/engine/ffmpeg -version | head -n 1
-          src-tauri/resources/engine/voxloom-engine --host 127.0.0.1 --port 18765 &
+          mkdir -p /tmp/poisoned-hf
+          printf '%s' 'hf_oauth_eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3MDAwMDAwMDB9.expired_sig' > /tmp/poisoned-hf/token
+          HF_HOME=/tmp/poisoned-hf HF_TOKEN="hf_oauth_eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3MDAwMDAwMDB9.expired_sig" src-tauri/resources/engine/voxloom-engine --host 127.0.0.1 --port 18765 &
           PID=$!
           for i in $(seq 1 20); do
             if curl -sf http://127.0.0.1:18765/api/system/health; then
@@ -110,6 +112,12 @@ jobs:
         run: |
           if (-not (Test-Path "src-tauri/resources/engine/_internal")) { throw "Missing _internal folder!" }
           & src-tauri/resources/engine/ffmpeg.exe -version | Select-Object -First 1
+          $poisonDir = "D:\poisoned-hf"
+          New-Item -ItemType Directory -Force -Path $poisonDir | Out-Null
+          Set-Content -Path "$poisonDir\token" -Value "hf_oauth_eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3MDAwMDAwMDB9.expired_sig" -NoNewline
+          $env:HF_HOME = $poisonDir
+          $env:HF_TOKEN = "hf_oauth_eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3MDAwMDAwMDB9.expired_sig"
+          $env:HUGGING_FACE_HUB_TOKEN = $env:HF_TOKEN
           $proc = Start-Process -FilePath "src-tauri/resources/engine/voxloom-engine.exe" -ArgumentList "--host 127.0.0.1 --port 18765" -PassThru
           $ok = $false
           for ($i = 0; $i -lt 30; $i++) {
@@ -124,7 +132,8 @@ jobs:
             } catch {}
           }
           Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
-          if (-not $ok) { throw "Bundled Windows engine failed health check!" }
+          Remove-Item Env:\HF_HOME, Env:\HF_TOKEN, Env:\HUGGING_FACE_HUB_TOKEN -ErrorAction SilentlyContinue
+          if (-not $ok) { throw "Bundled Windows engine failed health/Hub check!" }
 
       - name: Build Tauri app bundle & ad-hoc deep-sign (macOS)
         if: runner.os == 'macOS'

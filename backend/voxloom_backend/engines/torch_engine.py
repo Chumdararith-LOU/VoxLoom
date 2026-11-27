@@ -8,6 +8,7 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 
+from .. import hf_snapshot_download
 from .base import STTEngine, TTSEngine
 
 
@@ -53,7 +54,6 @@ class TorchTTSEngine(TTSEngine):
         device, dtype = self._resolve_device_and_dtype()
 
         try:
-            from huggingface_hub import snapshot_download
             from qwen_tts import Qwen3TTSModel
         except ImportError as exc:
             raise RuntimeError(
@@ -62,11 +62,14 @@ class TorchTTSEngine(TTSEngine):
             ) from exc
 
         # Resolve to a verified local snapshot folder first so transformers loads
-        # directly from disk and any real Hugging Face network/SSL error surfaces cleanly.
-        try:
-            local_dir = snapshot_download(repo_id=model_repo, local_files_only=True)
-        except Exception:
-            local_dir = snapshot_download(repo_id=model_repo)
+        # directly from disk without sending implicit expired OAuth tokens.
+        if Path(model_repo).is_dir():
+            local_dir = str(Path(model_repo))
+        else:
+            try:
+                local_dir = hf_snapshot_download(model_repo, local_files_only=True)
+            except Exception:
+                local_dir = hf_snapshot_download(model_repo)
 
         try:
             self._model = Qwen3TTSModel.from_pretrained(
@@ -153,7 +156,7 @@ class FasterWhisperSTTEngine(STTEngine):
     def transcribe(
         self,
         audio_path: Path,
-        model_repo: str = "turbo",
+        model_repo: str = "Systran/faster-whisper-base",
         language: str | None = None,
     ) -> str:
         try:
@@ -174,8 +177,26 @@ class FasterWhisperSTTEngine(STTEngine):
         except Exception:
             pass
 
-        size = "turbo" if "turbo" in model_repo else ("base" if "base" in model_repo else model_repo)
-        model = WhisperModel(size, device=device, compute_type=compute_type)
+        shorthand_map = {
+            "turbo": "mobiuslabsgmbh/faster-whisper-large-v3-turbo",
+            "large-v3-turbo": "mobiuslabsgmbh/faster-whisper-large-v3-turbo",
+            "base": "Systran/faster-whisper-base",
+        }
+        resolved_repo = shorthand_map.get(model_repo, model_repo)
+        if Path(resolved_repo).is_dir():
+            local_dir = str(Path(resolved_repo))
+        else:
+            try:
+                local_dir = hf_snapshot_download(resolved_repo, local_files_only=True)
+            except Exception:
+                local_dir = hf_snapshot_download(resolved_repo)
+
+        model = WhisperModel(
+            local_dir,
+            device=device,
+            compute_type=compute_type,
+            local_files_only=True,
+        )
         try:
             segments, _ = model.transcribe(str(audio_path), language=language, vad_filter=True)
             return " ".join(seg.text.strip() for seg in segments).strip()

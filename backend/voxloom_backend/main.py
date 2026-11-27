@@ -11,7 +11,7 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from . import __version__
+from . import __version__, configure_hf_environment
 from .models_manager import engine_manager
 from .routers import generate, models, profiles, system
 
@@ -63,7 +63,7 @@ def _ensure_valid_stdio() -> None:
 
 def _configure_tls_certificates() -> None:
     """Ensure HTTPS requests to Hugging Face Hub work inside frozen Windows/macOS bundles."""
-    os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
+    configure_hf_environment()
     try:
         import certifi
 

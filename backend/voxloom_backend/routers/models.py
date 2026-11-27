@@ -31,14 +31,13 @@ def list_models() -> dict:
 @router.get("/check-hub")
 def check_hub() -> dict:
     """Verify TLS connectivity to Hugging Face Hub and platform AI engine imports."""
-    from huggingface_hub import HfApi
-
+    from .. import hf_model_info
     from ..hardware import detect_hardware
 
     hw = detect_hardware()
     repo = "mlx-community/Qwen3-TTS-12Hz-1.7B-Base-8bit" if hw.recommended_backend == "mlx" else "Qwen/Qwen3-TTS-12Hz-0.6B-Base"
     try:
-        info = HfApi().model_info(repo)
+        info = hf_model_info(repo)
         if hw.recommended_backend == "mlx":
             import mlx_audio  # noqa: F401
         else:

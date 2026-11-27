@@ -8,10 +8,10 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Callable
 
-from huggingface_hub import HfApi, scan_cache_dir, snapshot_download
-from huggingface_hub.constants import HF_HUB_CACHE
+from huggingface_hub import scan_cache_dir
 from tqdm.auto import tqdm as base_tqdm
 
+from . import get_hf_cache_dir, hf_model_info, hf_snapshot_download
 from .engines.base import STTEngine, TTSEngine
 from .hardware import detect_hardware
 
@@ -132,7 +132,7 @@ def get_cached_repos() -> dict[str, int]:
     """Return {repo_id: size_on_disk_bytes} for locally cached HF models."""
     cached: dict[str, int] = {}
     try:
-        info = scan_cache_dir()
+        info = scan_cache_dir(cache_dir=get_hf_cache_dir())
         for repo in info.repos:
             cached[repo.repo_id] = repo.size_on_disk
     except Exception:
@@ -219,10 +219,9 @@ class EngineManager:
                 }
             )
 
-        api = HfApi()
         files = []
         try:
-            info = api.model_info(spec.repo_id, files_metadata=True)
+            info = hf_model_info(spec.repo_id, files_metadata=True)
             files = info.siblings or []
         except Exception:
             pass
@@ -232,7 +231,9 @@ class EngineManager:
         if total_bytes <= 0:
             total_bytes = int(spec.size_gb * (1024**3))
 
-        blobs_dir = Path(HF_HUB_CACHE) / ("models--" + spec.repo_id.replace("/", "--")) / "blobs"
+        blobs_dir = (
+            Path(get_hf_cache_dir()) / ("models--" + spec.repo_id.replace("/", "--")) / "blobs"
+        )
 
         tracker_lock = threading.Lock()
         tracker = {
@@ -322,7 +323,7 @@ class EngineManager:
         monitor_thread = threading.Thread(target=_monitor_loop, daemon=True)
         monitor_thread.start()
         try:
-            local_path = snapshot_download(repo_id=spec.repo_id, tqdm_class=_ProgressTqdm)
+            local_path = hf_snapshot_download(spec.repo_id, tqdm_class=_ProgressTqdm)
         finally:
             stop_event.set()
             monitor_thread.join(timeout=1.5)

@@ -276,8 +276,8 @@ export function ModelsHardwareView({
                   ) : (
                     <button
                       type="button"
-                      className="btn"
-                      disabled={!m.compatible || downloadingId !== null}
+                      className={m.compatible ? "btn btn-primary" : "btn"}
+                      disabled={!m.compatible || downloadingId !== null || loadingId !== null}
                       onClick={() => handleDownload(m)}
                     >
                       {isDownloading ? <Loader2 size={14} /> : <Download size={14} />}
@@ -287,7 +287,7 @@ export function ModelsHardwareView({
                     </button>
                   )}
 
-                  {m.kind === "tts" && m.compatible && !m.loaded && (
+                  {m.downloaded && m.kind === "tts" && m.compatible && !m.loaded && (
                     <button
                       type="button"
                       className="btn btn-primary"

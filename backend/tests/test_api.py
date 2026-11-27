@@ -146,3 +146,73 @@ def test_profile_lifecycle_and_generation(client: TestClient) -> None:
     # Delete profile
     deleted = client.delete(f"/api/profiles/{profile_id}")
     assert deleted.status_code == 200
+
+
+EXPIRED_OAUTH_TOKEN = (
+    "hf_oauth_eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9."
+    "eyJleHAiOjE3MDAwMDAwMDAsInN1YiI6InRlc3QifQ.expired_signature"
+)
+
+
+def test_expired_hf_oauth_token_ignored(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ensure cached/env Hugging Face OAuth tokens are never sent implicitly on public Hub requests."""
+    from huggingface_hub.utils._headers import build_hf_headers
+
+    from voxloom_backend import configure_hf_environment, get_hf_token
+
+    fake_hf_home = tmp_path / "hf_home"
+    fake_hf_home.mkdir(parents=True, exist_ok=True)
+    (fake_hf_home / "token").write_text(EXPIRED_OAUTH_TOKEN, encoding="utf-8")
+
+    monkeypatch.delenv("VOXLOOM_HF_TOKEN", raising=False)
+    monkeypatch.setenv("HF_HOME", str(fake_hf_home))
+    monkeypatch.setenv("HF_TOKEN", EXPIRED_OAUTH_TOKEN)
+    monkeypatch.setenv("HUGGING_FACE_HUB_TOKEN", EXPIRED_OAUTH_TOKEN)
+
+    configure_hf_environment()
+
+    assert get_hf_token() is False
+    explicit_headers = build_hf_headers(token=get_hf_token())
+    implicit_headers = build_hf_headers()
+    assert "authorization" not in {k.lower() for k in explicit_headers}
+    assert "authorization" not in {k.lower() for k in implicit_headers}
+
+
+def test_live_hub_with_expired_oauth_token(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify live Hugging Face Hub metadata + file download succeed even with a poisoned expired OAuth token."""
+    import socket
+
+    from voxloom_backend import (
+        configure_hf_environment,
+        hf_model_info,
+        hf_snapshot_download,
+    )
+
+    try:
+        socket.create_connection(("huggingface.co", 443), timeout=5).close()
+    except OSError:
+        pytest.skip("Offline environment: skipping live Hugging Face Hub verification")
+
+    fake_hf_home = tmp_path / "hf_home_live"
+    fake_hf_home.mkdir(parents=True, exist_ok=True)
+    (fake_hf_home / "token").write_text(EXPIRED_OAUTH_TOKEN, encoding="utf-8")
+
+    monkeypatch.delenv("VOXLOOM_HF_TOKEN", raising=False)
+    monkeypatch.setenv("HF_HOME", str(fake_hf_home))
+    monkeypatch.setenv("HF_HUB_CACHE", str(fake_hf_home / "hub"))
+    monkeypatch.setenv("HF_TOKEN", EXPIRED_OAUTH_TOKEN)
+    monkeypatch.setenv("HUGGING_FACE_HUB_TOKEN", EXPIRED_OAUTH_TOKEN)
+
+    configure_hf_environment()
+
+    repo = "Qwen/Qwen3-TTS-12Hz-0.6B-Base"
+    info = hf_model_info(repo, files_metadata=True)
+    assert info.id == repo
+
+    local_dir = Path(hf_snapshot_download(repo, allow_patterns=["config.json"]))
+    assert (local_dir / "config.json").is_file()
+
+    # Also verify fallback when a user-supplied VOXLOOM_HF_TOKEN itself has expired
+    monkeypatch.setenv("VOXLOOM_HF_TOKEN", EXPIRED_OAUTH_TOKEN)
+    fallback_info = hf_model_info(repo)
+    assert fallback_info.id == repo

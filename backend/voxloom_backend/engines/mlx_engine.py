@@ -6,6 +6,7 @@ import gc
 import shutil
 from pathlib import Path
 
+from .. import get_hf_token, hf_snapshot_download
 from .base import STTEngine, TTSEngine
 
 
@@ -30,7 +31,15 @@ class MLXTTSEngine(TTSEngine):
         self.unload()
         from mlx_audio.tts.utils import load_model
 
-        self._model = load_model(model_repo)
+        if Path(model_repo).is_dir():
+            local_dir = Path(model_repo)
+        else:
+            try:
+                local_dir = Path(hf_snapshot_download(model_repo, local_files_only=True))
+            except Exception:
+                local_dir = Path(hf_snapshot_download(model_repo))
+
+        self._model = load_model(local_dir)
         self._repo = model_repo
 
     def unload(self) -> None:
@@ -89,9 +98,14 @@ class MLXSTTEngine(STTEngine):
 
     def _ensure_whisper_processor(self, model_repo: str) -> str:
         """Ensure mlx-community Whisper snapshots include HuggingFace processor files."""
-        from huggingface_hub import snapshot_download
+        if Path(model_repo).is_dir():
+            snapshot_dir = Path(model_repo)
+        else:
+            try:
+                snapshot_dir = Path(hf_snapshot_download(model_repo, local_files_only=True))
+            except Exception:
+                snapshot_dir = Path(hf_snapshot_download(model_repo))
 
-        snapshot_dir = Path(snapshot_download(repo_id=model_repo))
         if not (snapshot_dir / "preprocessor_config.json").exists():
             from transformers import WhisperProcessor
 
@@ -103,7 +117,11 @@ class MLXSTTEngine(STTEngine):
             elif "base" in model_repo:
                 base_repo = "openai/whisper-base"
 
-            processor = WhisperProcessor.from_pretrained(base_repo)
+            token = get_hf_token()
+            try:
+                processor = WhisperProcessor.from_pretrained(base_repo, token=token)
+            except Exception:
+                processor = WhisperProcessor.from_pretrained(base_repo, token=False)
             processor.save_pretrained(str(snapshot_dir))
         return str(snapshot_dir)
 
