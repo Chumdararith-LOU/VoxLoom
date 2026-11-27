@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import threading
+import time
 from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import Callable
 
 from huggingface_hub import HfApi, scan_cache_dir, snapshot_download
+from huggingface_hub.constants import HF_HUB_CACHE
+from tqdm.auto import tqdm as base_tqdm
 
 from .engines.base import STTEngine, TTSEngine
 from .hardware import detect_hardware
@@ -201,7 +205,19 @@ class EngineManager:
     ) -> dict:
         spec = get_model_spec(model_id)
         if on_progress:
-            on_progress({"stage": "starting", "model_id": spec.id, "percent": 0, "message": f"Resolving {spec.repo_id}..."})
+            on_progress(
+                {
+                    "stage": "starting",
+                    "model_id": spec.id,
+                    "percent": 0.0,
+                    "downloaded_mb": 0.0,
+                    "total_mb": round(spec.size_gb * 1024.0, 1),
+                    "speed_mb_s": 0.0,
+                    "eta_sec": None,
+                    "current_file": "",
+                    "message": f"Resolving {spec.repo_id}…",
+                }
+            )
 
         api = HfApi()
         files = []
@@ -212,21 +228,121 @@ class EngineManager:
             pass
 
         total_files = max(1, len(files))
-        if on_progress:
-            on_progress(
-                {
-                    "stage": "downloading",
-                    "model_id": spec.id,
-                    "percent": 10,
-                    "message": f"Downloading {spec.name} (~{spec.size_gb} GB) from Hugging Face Hub...",
-                    "total_files": total_files,
-                }
-            )
+        total_bytes = sum((getattr(s, "size", 0) or 0) for s in files)
+        if total_bytes <= 0:
+            total_bytes = int(spec.size_gb * (1024**3))
 
-        local_path = snapshot_download(repo_id=spec.repo_id)
+        blobs_dir = Path(HF_HUB_CACHE) / ("models--" + spec.repo_id.replace("/", "--")) / "blobs"
+
+        tracker_lock = threading.Lock()
+        tracker = {
+            "tqdm_bytes": 0,
+            "current_file": "",
+        }
+        stop_event = threading.Event()
+
+        class _ProgressTqdm(base_tqdm):
+            def __init__(self, *args, **kwargs):
+                kwargs["disable"] = True
+                super().__init__(*args, **kwargs)
+                self._is_bytes = kwargs.get("unit") in ("B", "iB") or bool(kwargs.get("unit_scale"))
+                desc = str(kwargs.get("desc") or "").strip()
+                if desc and not desc.startswith("Fetching"):
+                    with tracker_lock:
+                        tracker["current_file"] = desc
+
+            def update(self, n=1):
+                if self._is_bytes and n and n > 0:
+                    with tracker_lock:
+                        tracker["tqdm_bytes"] += int(n)
+                return super().update(n)
+
+        def _measure_blobs_bytes() -> int:
+            if not blobs_dir.is_dir():
+                return 0
+            total = 0
+            try:
+                for p in blobs_dir.iterdir():
+                    try:
+                        total += p.stat().st_size
+                    except OSError:
+                        pass
+            except OSError:
+                pass
+            return total
+
+        def _monitor_loop() -> None:
+            start_t = time.monotonic()
+            prev_t = start_t
+            prev_bytes = _measure_blobs_bytes()
+            ema_speed = 0.0
+
+            while not stop_event.wait(0.45):
+                now = time.monotonic()
+                disk_bytes = _measure_blobs_bytes()
+                with tracker_lock:
+                    cur_bytes = max(disk_bytes, tracker["tqdm_bytes"])
+                    cur_file = tracker["current_file"]
+
+                # Cap at 99.5% until snapshot_download returns
+                bounded = min(cur_bytes, int(total_bytes * 0.995))
+                dt = max(0.05, now - prev_t)
+                inst_speed = max(0.0, (cur_bytes - prev_bytes) / dt)
+                ema_speed = inst_speed if ema_speed == 0.0 else (0.35 * inst_speed + 0.65 * ema_speed)
+
+                if cur_bytes <= prev_bytes and (now - start_t) > 1.0:
+                    avg_speed = max(0.0, cur_bytes / max(0.1, now - start_t))
+                    speed_bps = ema_speed if ema_speed > 0 else avg_speed
+                else:
+                    speed_bps = ema_speed
+
+                prev_t = now
+                prev_bytes = cur_bytes
+
+                percent = min(99.5, (bounded / max(1, total_bytes)) * 100.0)
+                remaining_bytes = max(0, total_bytes - bounded)
+                eta_sec = int(remaining_bytes / speed_bps) if speed_bps > 10_000 else None
+
+                if on_progress:
+                    on_progress(
+                        {
+                            "stage": "downloading",
+                            "model_id": spec.id,
+                            "percent": round(percent, 1),
+                            "downloaded_mb": round(bounded / (1024**2), 1),
+                            "total_mb": round(total_bytes / (1024**2), 1),
+                            "speed_mb_s": round(speed_bps / (1024**2), 2),
+                            "eta_sec": eta_sec,
+                            "current_file": cur_file,
+                            "total_files": total_files,
+                            "message": f"Downloading {spec.name}…",
+                        }
+                    )
+
+        monitor_thread = threading.Thread(target=_monitor_loop, daemon=True)
+        monitor_thread.start()
+        try:
+            local_path = snapshot_download(repo_id=spec.repo_id, tqdm_class=_ProgressTqdm)
+        finally:
+            stop_event.set()
+            monitor_thread.join(timeout=1.5)
 
         # If this is an MLX Whisper model, also fetch the HF WhisperProcessor config so STT works offline
         if spec.kind == "stt" and spec.backend == "mlx":
+            if on_progress:
+                on_progress(
+                    {
+                        "stage": "downloading",
+                        "model_id": spec.id,
+                        "percent": 99.5,
+                        "downloaded_mb": round(total_bytes / (1024**2), 1),
+                        "total_mb": round(total_bytes / (1024**2), 1),
+                        "speed_mb_s": 0.0,
+                        "eta_sec": 0,
+                        "current_file": "WhisperProcessor config",
+                        "message": "Fetching Whisper processor config…",
+                    }
+                )
             try:
                 from .engines.mlx_engine import MLXSTTEngine
 
@@ -239,7 +355,12 @@ class EngineManager:
                 {
                     "stage": "complete",
                     "model_id": spec.id,
-                    "percent": 100,
+                    "percent": 100.0,
+                    "downloaded_mb": round(total_bytes / (1024**2), 1),
+                    "total_mb": round(total_bytes / (1024**2), 1),
+                    "speed_mb_s": 0.0,
+                    "eta_sec": 0,
+                    "current_file": "",
                     "message": f"Cached locally at {local_path}",
                 }
             )

@@ -1,6 +1,6 @@
 {
   "name": "voxloom",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "private": true,
   "description": "Local-first voice cloning & timeline gap-fill studio for macOS (Apple Silicon MLX) and Windows (CUDA/CPU)",
   "type": "module",
